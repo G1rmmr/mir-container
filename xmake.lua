@@ -15,7 +15,7 @@ set_kind("static")
 set_languages("c++20")
 -- Export current directory and subdirectories so dependency targets can automatically include our headers
 add_includedirs("src", "src/container", "src/memory", { public = true })
-add_headerfiles("src/**.hpp")
+add_headerfiles("src/**.hpp", {basedir = "src"})
 add_files("src/*.cpp")
 
 -- Unit Test Target
