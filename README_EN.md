@@ -23,7 +23,7 @@
 * **String.hpp**: Fixed-size buffer optimized string class with implicit conversion to `std::string_view` and concatenation support.
 * **Map.hpp**: High-speed key-value hash map using `std::hash` with duplicate key handling and iteration support.
 * **Pool.hpp**: High-performance resource pool featuring generation-based dangling handle safety and object reuse.
-* **SparseSet.hpp**: Sparse set optimized for entity/component management using swap-on-remove dense packing.
+* **SparseSet.hpp**: Sparse set optimized for entity/component management using swap-on-remove dense packing and a **Paged Architecture** to completely prevent memory explosion at massive entity scale.
 * **CommandBuffer.hpp**: High-throughput non-owning deferred command buffer for executing bulk operations.
 
 ### 2. Memory Allocators
