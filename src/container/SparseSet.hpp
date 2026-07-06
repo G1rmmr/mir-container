@@ -6,28 +6,55 @@
 #include <concepts>
 #include <algorithm>
 
-namespace zet {
+#ifndef ZET_NAMESPACE
+#define ZET_NAMESPACE zet
+#endif
+
+namespace ZET_NAMESPACE {
     const static std::size_t DEFAULT_SPARSE_SET_CAPACITY = 1024;
 
     template <typename T, std::size_t C = DEFAULT_SPARSE_SET_CAPACITY> 
     requires (C > 0) && std::destructible<T>
     class SparseSet {
     public:
+        static constexpr std::size_t PAGE_SIZE = 4096;
+        static constexpr std::size_t MAX_PAGES = (C + PAGE_SIZE - 1) / PAGE_SIZE;
+
         constexpr SparseSet() {
-            std::fill(sparse, sparse + C, INVALID);
+            std::fill(sparse_pages, sparse_pages + MAX_PAGES, nullptr);
+        }
+
+        constexpr ~SparseSet() {
+            Clear();
+            for (std::size_t i = 0; i < MAX_PAGES; ++i) {
+                if (sparse_pages[i]) {
+                    delete[] sparse_pages[i];
+                    sparse_pages[i] = nullptr;
+                }
+            }
         }
 
         template <typename... Args> requires std::constructible_from<T, Args...>
         constexpr T& Assign(std::size_t id, Args&&... args) {
-            assert(id < C && "[zet::SparseSet] ID OUT OF RANGE");
-            if (Contains(id)) {
-                std::destroy_at(std::addressof(data[sparse[id]].value));
-                T* ptr = std::construct_at(std::addressof(data[sparse[id]].value), std::forward<Args>(args)...);
+            assert(id < C && "[SparseSet] ID OUT OF RANGE");
+            
+            std::size_t page = id / PAGE_SIZE;
+            std::size_t offset = id % PAGE_SIZE;
+            
+            if (!sparse_pages[page]) {
+                sparse_pages[page] = new std::size_t[PAGE_SIZE];
+                std::fill(sparse_pages[page], sparse_pages[page] + PAGE_SIZE, INVALID);
+            }
+
+            if (sparse_pages[page][offset] != INVALID) {
+                std::size_t denseIndex = sparse_pages[page][offset];
+                std::destroy_at(std::addressof(data[denseIndex].value));
+                T* ptr = std::construct_at(std::addressof(data[denseIndex].value), std::forward<Args>(args)...);
                 return *ptr;
             }
 
             std::size_t denseIndex = count;
-            sparse[id] = denseIndex;
+            sparse_pages[page][offset] = denseIndex;
             ids[denseIndex] = id;
             
             T* ptr = std::construct_at(std::addressof(data[count++].value), std::forward<Args>(args)...);
@@ -39,18 +66,24 @@ namespace zet {
                 return;
             }
 
-            std::size_t toRemove = sparse[id];
+            std::size_t page = id / PAGE_SIZE;
+            std::size_t offset = id % PAGE_SIZE;
+
+            std::size_t toRemove = sparse_pages[page][offset];
             std::size_t lastIndex = count - 1;
             std::size_t lastId = ids[lastIndex];
 
             if (toRemove != lastIndex) {
                 data[toRemove].value = std::move(data[lastIndex].value);
                 ids[toRemove] = lastId;
-                sparse[lastId] = toRemove;
+                
+                std::size_t lastPage = lastId / PAGE_SIZE;
+                std::size_t lastOffset = lastId % PAGE_SIZE;
+                sparse_pages[lastPage][lastOffset] = toRemove;
             }
 
             std::destroy_at(std::addressof(data[lastIndex].value));
-            sparse[id] = INVALID;
+            sparse_pages[page][offset] = INVALID;
             count--;
         }
 
@@ -59,18 +92,25 @@ namespace zet {
                 return false;
             }
 
-            std::size_t index = sparse[id];
+            std::size_t page = id / PAGE_SIZE;
+            std::size_t offset = id % PAGE_SIZE;
+
+            if (!sparse_pages[page] || sparse_pages[page][offset] == INVALID) {
+                return false;
+            }
+
+            std::size_t index = sparse_pages[page][offset];
             return index < count && ids[index] == id;
         }
 
         constexpr T& Get(std::size_t id) {
-            assert(Contains(id) && "[zet::SparseSet] ID NOT FOUND");
-            return data[sparse[id]].value;
+            assert(Contains(id) && "[SparseSet] ID NOT FOUND");
+            return data[sparse_pages[id / PAGE_SIZE][id % PAGE_SIZE]].value;
         }
 
         constexpr const T& Get(std::size_t id) const {
-            assert(Contains(id) && "[zet::SparseSet] ID NOT FOUND");
-            return data[sparse[id]].value;
+            assert(Contains(id) && "[SparseSet] ID NOT FOUND");
+            return data[sparse_pages[id / PAGE_SIZE][id % PAGE_SIZE]].value;
         }
 
         constexpr std::size_t Size() const noexcept { 
@@ -78,7 +118,7 @@ namespace zet {
         }
         
         constexpr T& GetAt(std::size_t index) {
-            assert(index < count && "[zet::SparseSet] INDEX OUT OF BOUNDS");
+            assert(index < count && "[SparseSet] INDEX OUT OF BOUNDS");
             return data[index].value;
         }
 
@@ -98,6 +138,15 @@ namespace zet {
             return std::addressof(data[count].value); 
         }
 
+        constexpr void Clear() {
+            for (std::size_t i = 0; i < count; ++i) {
+                std::destroy_at(std::addressof(data[i].value));
+                std::size_t id = ids[i];
+                sparse_pages[id / PAGE_SIZE][id % PAGE_SIZE] = INVALID;
+            }
+            count = 0;
+        }
+
     private:
         static constexpr std::size_t INVALID = static_cast<std::size_t>(-1);
 
@@ -108,9 +157,8 @@ namespace zet {
         };
 
         Storage data[C];
-
-        std::size_t sparse[C];
         std::size_t ids[C];
+        std::size_t* sparse_pages[MAX_PAGES]{};
         std::size_t count = 0;
     };
 }
