@@ -113,6 +113,14 @@ namespace zet {
             nextFree = handle.Index;
         }
 
+        constexpr std::size_t GetGeneration(std::size_t index) const noexcept {
+            return index < C ? generations[index] : 0;
+        }
+
+        constexpr bool IsOccupied(std::size_t index) const noexcept {
+            return index < C && occupied[index];
+        }
+
         constexpr T& Get(PoolHandle handle) {
             assert(handle.Index < C && "[zet::Pool] INVALID INDEX");
 
