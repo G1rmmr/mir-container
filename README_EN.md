@@ -2,13 +2,15 @@
 
 > C++20 Standard Container & Memory Library (ZET - Zero-allocated Execution Toolkit)
 > 
-> This library is a collection of high-performance, lightweight custom data structures and custom memory management utilities. It is designed to satisfy the ZET specifications for zero runtime heap allocations. It offers both the flexibility of a header-only design and the robustness of static library (.a/.lib) compilation.
+> ZET is a C++20 container and memory toolkit that never allocates heap storage internally. Capacity is fixed at compile time or supplied explicitly by the caller as an external buffer. ZET performs no hidden growth and has no heap fallback.
 
 ---
 
 ## Key Features
 
-* **Zero Runtime Allocation**: Designed for safety and speed by avoiding arbitrary runtime heap allocations.
+* **No Library-owned Allocation**: ZET does not obtain storage with `new`, `delete`, `malloc`, or `free`.
+* **Explicit Capacity**: Storage is fixed or caller-provided and never grows implicitly.
+* **Predictable Failure**: Capacity and input failures are reported by APIs such as `Pool::Create`, `Pool::TryGet`, and `CommandBuffer::Push`.
 * **C++20 Standard Compliance**: Type-safe template constraints using concepts and requires clauses.
 * **Lightweight Design**: Minimized dependencies, maximizing memory and allocation efficiency.
 * **Xmake System Integration**: Fully automated builds, packaging, and unit testing via the xmake build system.
@@ -23,19 +25,27 @@
 * **String.hpp**: Fixed-size buffer optimized string class with implicit conversion to `std::string_view` and concatenation support.
 * **Map.hpp**: High-speed key-value hash map using `std::hash` with duplicate key handling and iteration support.
 * **Pool.hpp**: High-performance resource pool featuring generation-based dangling handle safety and object reuse.
-* **SparseSet.hpp**: Sparse set optimized for entity/component management using swap-on-remove dense packing and a **Paged Architecture** to completely prevent memory explosion at massive entity scale.
+* **SparseSet.hpp**: Fully fixed-capacity sparse set with dense packing and no runtime page allocation.
 * **CommandBuffer.hpp**: High-throughput non-owning deferred command buffer for executing bulk operations.
 
 ### 2. Memory Allocators
-* **LinearAllocator.hpp**: Extremely fast arena allocator that resets all memory at once. It supports registration of object destructors to prevent memory leaks on non-trivial types.
-* **StackAllocator.hpp**: LIFO-style stack allocator that allows allocating and deallocating back to a specific marker.
-* **PointerHandle.hpp**: A non-owning safety handle (`PointerHandle<T>`) used to safely reference memory blocks inside allocators using offsets rather than raw pointers, making it safe against memory compaction or relocation.
+* **LinearAllocator.hpp**: Operates exclusively on a caller-provided buffer and reuses it on reset.
+* **StackAllocator.hpp**: Provides LIFO allocation and marker rewind over a caller-provided buffer.
+* **PointerHandle.hpp**: Stores an allocator-relative offset and epoch. Handles become invalid after reset or rewind.
+
+```cpp
+alignas(64) std::array<std::byte, 1024 * 1024> memory{};
+zet::memory::LinearAllocator arena(memory);
+auto value = arena.CreateHandle<int>(42);
+```
+
+Allocations performed by user-provided value types or callbacks are outside ZET's guarantee. For example, `List<std::string, 16>` has fixed container storage, but `std::string` may allocate internally.
 
 ---
 
 ## 1. Local Build and Unit Testing
 
-This project integrates doctest, a lightweight C++ unit testing framework, to provide 100% functional test coverage.
+This project uses doctest for behavior tests and allocation-count checks on core paths.
 
 ### Build and Run Commands
 
