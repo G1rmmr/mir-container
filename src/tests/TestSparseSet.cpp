@@ -2,6 +2,9 @@
 #include "SparseSet.hpp"
 #include "String.hpp"
 #include <ostream>
+#include <cstdlib>
+
+std::size_t AllocationCount() noexcept;
 
 TEST_CASE("SparseSet basic operations") {
     zet::SparseSet<zet::String<32>, 10> set;
@@ -38,7 +41,7 @@ TEST_CASE("SparseSet basic operations") {
         CHECK(set.GetAt(1) == "Three");
     }
     
-    SUBCASE("Iteration") {
+	SUBCASE("Iteration") {
         set.Assign(1, "One");
         set.Assign(3, "Three");
         
@@ -47,6 +50,15 @@ TEST_CASE("SparseSet basic operations") {
             (void)item;
             count++;
         }
-        CHECK(count == 2);
-    }
+		CHECK(count == 2);
+	}
+
+	SUBCASE("Operations do not allocate") {
+		auto before = AllocationCount();
+		set.Assign(1, "One");
+		set.Assign(3, "Three");
+		set.Remove(1);
+		set.Clear();
+		CHECK(AllocationCount() == before);
+	}
 }

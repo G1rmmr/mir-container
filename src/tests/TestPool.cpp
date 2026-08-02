@@ -55,4 +55,16 @@ TEST_CASE("Pool basic operations") {
         }
         CHECK(count == 2);
     }
+
+    SUBCASE("Capacity and stale handles fail safely") {
+        auto h1 = pool.Create("One");
+        pool.Create("Two");
+        pool.Create("Three");
+        pool.Create("Four");
+        CHECK(pool.Create("Overflow") == zet::INVALID_POOL_HANDLE);
+
+        pool.Destroy(h1);
+        CHECK_FALSE(pool.IsValid(h1));
+        CHECK(pool.TryGet(h1) == nullptr);
+    }
 }

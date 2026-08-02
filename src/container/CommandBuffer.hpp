@@ -15,20 +15,30 @@ namespace zet {
 		};
 
 		template<typename T> requires std::is_trivially_copyable_v<T>
-		constexpr void Push(void (*apply)(const void*), const T& data) noexcept {
-			std::size_t alignSize = alignof(std::max_align_t);
-			std::size_t alignedOffset = (writeOffset + alignSize - 1) & ~(alignSize - 1);
-			std::size_t headerSize = sizeof(Header);
-			std::size_t dataSize = sizeof(T);
+		[[nodiscard]] constexpr bool Push(void (*apply)(const void*), const T& data) noexcept {
+			if constexpr (sizeof(Header) + sizeof(T) > C) {
+				return false;
+			} else {
+				std::size_t alignSize = alignof(std::max_align_t);
+				std::size_t alignedOffset = (writeOffset + alignSize - 1) & ~(alignSize - 1);
+				std::size_t headerSize = sizeof(Header);
+				std::size_t dataSize = sizeof(T);
 
-			assert(alignedOffset + headerSize + dataSize <= C && "[CommandBuffer] DATA SIZE OVERFLOW");
+				if (apply == nullptr || alignedOffset + headerSize + dataSize > C) {
+					return false;
+				}
 
-			Header header{apply, dataSize};
-			std::memcpy(stream + alignedOffset, &header, headerSize);
-			std::memcpy(stream + alignedOffset + headerSize, &data, dataSize);
+				Header header{apply, dataSize};
+				std::memcpy(stream + alignedOffset, &header, headerSize);
+				std::memcpy(stream + alignedOffset + headerSize, &data, dataSize);
 
-			writeOffset = alignedOffset + headerSize + dataSize;
+				writeOffset = alignedOffset + headerSize + dataSize;
+				return true;
+			}
 		}
+
+		constexpr std::size_t SizeBytes() const noexcept { return writeOffset; }
+		static constexpr std::size_t CapacityBytes() noexcept { return C; }
 
 		constexpr void Commit() noexcept {
 			std::size_t readOffset = 0;
