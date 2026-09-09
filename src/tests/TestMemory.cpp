@@ -2,6 +2,7 @@
 #include "LinearAllocator.hpp"
 #include "StackAllocator.hpp"
 #include "PointerHandle.hpp"
+#include <array>
 
 struct DestructCounter {
     int* counter;
@@ -12,7 +13,8 @@ struct DestructCounter {
 };
 
 TEST_CASE("LinearAllocator and PointerHandle operations") {
-    zet::memory::LinearAllocator allocator(1024);
+	alignas(64) std::array<std::byte, 1024> storage{};
+	zet::memory::LinearAllocator allocator(storage);
 
     SUBCASE("First allocation has offset 0 and is not null") {
         zet::PointerHandle<int> handle = allocator.CreateHandle<int>(42);
@@ -51,7 +53,8 @@ TEST_CASE("LinearAllocator and PointerHandle operations") {
 
     SUBCASE("CreateHandle buffer overflow prevention") {
         // Create an allocator of size 8
-        zet::memory::LinearAllocator smallAlloc(8);
+		alignas(64) std::array<std::byte, 8> smallStorage{};
+		zet::memory::LinearAllocator smallAlloc(smallStorage);
         
         // Creating an object of size 8 fits
         auto h1 = smallAlloc.CreateHandle<double>(1.0);
@@ -73,7 +76,8 @@ TEST_CASE("LinearAllocator and PointerHandle operations") {
         // DestructCounter is created, but the destructor node fails to allocate.
         // In this case, Create should destruct the object immediately and return nullptr to prevent a leak.
         {
-            zet::memory::LinearAllocator tinyAlloc(16);
+			alignas(64) std::array<std::byte, 16> tinyStorage{};
+			zet::memory::LinearAllocator tinyAlloc(tinyStorage);
             DestructCounter* ptr = tinyAlloc.Create<DestructCounter, true>(&destructCount);
             CHECK(ptr == nullptr);
             CHECK(destructCount == 1); // Destructed immediately
@@ -82,7 +86,8 @@ TEST_CASE("LinearAllocator and PointerHandle operations") {
 }
 
 TEST_CASE("StackAllocator operations") {
-    zet::memory::StackAllocator allocator(1024);
+	alignas(64) std::array<std::byte, 1024> storage{};
+	zet::memory::StackAllocator allocator(storage);
 
     SUBCASE("Basic allocation") {
         zet::PointerHandle<int> handle = allocator.CreateHandle<int>(7);
@@ -101,11 +106,14 @@ TEST_CASE("StackAllocator operations") {
         CHECK(*handle1.Get() == 1);
         CHECK(*handle2.Get() == 2);
         
-        allocator.FreeToMarker(marker1);
+		allocator.FreeToMarker(marker1);
+		CHECK(handle1.Get() == nullptr);
+		CHECK(handle2.Get() == nullptr);
     }
 
     SUBCASE("CreateHandle buffer overflow prevention") {
-        zet::memory::StackAllocator smallAlloc(8);
+		alignas(64) std::array<std::byte, 8> smallStorage{};
+		zet::memory::StackAllocator smallAlloc(smallStorage);
         auto h1 = smallAlloc.CreateHandle<double>(1.0);
         CHECK(h1.Get() != nullptr);
         
@@ -113,4 +121,3 @@ TEST_CASE("StackAllocator operations") {
         CHECK(h2.Get() == nullptr);
     }
 }
-

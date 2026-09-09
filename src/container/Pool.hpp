@@ -85,7 +85,9 @@ namespace zet {
 
         template <typename... Args> requires std::constructible_from<T, Args...>
         constexpr PoolHandle Create(Args&&... args) {
-            assert(nextFree != TERMINATOR && "[zet::Pool] POOL IS FULL");
+            if (nextFree == TERMINATOR) {
+                return INVALID_POOL_HANDLE;
+            }
 
             std::size_t index = nextFree;
             nextFree = data[index].next;
@@ -95,6 +97,19 @@ namespace zet {
             
             return PoolHandle{ index, generations[index] };
         }
+
+		constexpr bool IsValid(PoolHandle handle) const noexcept {
+			return handle.Index < C && occupied[handle.Index] &&
+				generations[handle.Index] == handle.Generation;
+		}
+
+		constexpr T* TryGet(PoolHandle handle) noexcept {
+			return IsValid(handle) ? std::addressof(data[handle.Index].value) : nullptr;
+		}
+
+		constexpr const T* TryGet(PoolHandle handle) const noexcept {
+			return IsValid(handle) ? std::addressof(data[handle.Index].value) : nullptr;
+		}
 
         constexpr void Destroy(PoolHandle handle) {
             assert(handle.Index < C && "[zet::Pool] INVALID INDEX");
@@ -111,6 +126,14 @@ namespace zet {
             
             data[handle.Index].next = nextFree;
             nextFree = handle.Index;
+        }
+
+        constexpr std::size_t GetGeneration(std::size_t index) const noexcept {
+            return index < C ? generations[index] : 0;
+        }
+
+        constexpr bool IsOccupied(std::size_t index) const noexcept {
+            return index < C && occupied[index];
         }
 
         constexpr T& Get(PoolHandle handle) {

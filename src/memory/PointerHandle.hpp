@@ -7,10 +7,11 @@ namespace zet {
 	template <typename T>
 	class PointerHandle {
 	public:
-		PointerHandle() : allocator(nullptr), offset(0) {}
+		PointerHandle() : allocator(nullptr), offset(0), epoch(0) {}
 		PointerHandle(MemoryAllocator* allocator, const std::uint32_t offset)
 			: allocator(allocator)
-			, offset(offset) {}
+			, offset(offset)
+			, epoch(allocator ? allocator->GetEpoch() : 0) {}
 
 		~PointerHandle() {
 			Reset();
@@ -21,24 +22,28 @@ namespace zet {
 
 		PointerHandle(PointerHandle&& other) noexcept
 			: allocator(other.allocator)
-			, offset(other.offset) {
+			, offset(other.offset)
+			, epoch(other.epoch) {
 			other.allocator = nullptr;
 			other.offset = 0;
+			other.epoch = 0;
 		}
 
 		PointerHandle& operator=(PointerHandle&& other) noexcept {
 			if(this != &other) {
 				allocator = other.allocator;
 				offset = other.offset;
+				epoch = other.epoch;
 				other.allocator = nullptr;
 				other.offset = 0;
+				other.epoch = 0;
 			}
 
 			return *this;
 		}
 
 		T* Get() const {
-			if(allocator == nullptr) {
+			if(allocator == nullptr || allocator->GetEpoch() != epoch) {
 				return nullptr;
 			}
 
@@ -48,10 +53,12 @@ namespace zet {
 		void Reset() {
 			allocator = nullptr;
 			offset = 0;
+			epoch = 0;
 		}
 
 	private:
 		MemoryAllocator* allocator;
 		std::uint32_t offset;
+		std::uint64_t epoch;
 	};
 }

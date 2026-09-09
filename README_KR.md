@@ -2,13 +2,15 @@
 
 > C++20 표준 컨테이너 및 메모리 라이브러리 (ZET - Zero-allocated Execution Toolkit)
 > 
-> 본 라이브러리는 List, Map, Pool, SparseSet, String, CommandBuffer 등 ZET 사양을 충족하는 C++20 기반 고성능/초경량 커스텀 자료구조 및 메모리 관리 유틸리티 모음집입니다. 런타임 힙 할당을 최소화하거나 배제하도록 설계되었습니다. 헤더 전용(Header-only) 설계의 유연함과 정적 라이브러리(.a/.lib) 컴파일 빌드의 견고함을 모두 제공합니다.
+> ZET는 내부에서 힙 메모리를 할당하지 않는 C++20 컨테이너 및 메모리 도구 모음입니다. 모든 용량은 컴파일 타임에 결정되거나 호출자가 제공한 외부 버퍼로 결정됩니다. ZET는 숨겨진 확장이나 힙 fallback을 수행하지 않습니다.
 
 ---
 
 ## 주요 특징
 
-* **런타임 무할당 (Zero Runtime Allocation)**: 런타임 중 임의의 힙 할당을 차단하여 성능 병목과 메모리 단편화를 원천적으로 예방합니다.
+* **라이브러리 자체 무할당**: ZET 구현은 `new`, `delete`, `malloc`, `free`로 저장 공간을 확보하지 않습니다.
+* **명시적 용량**: 고정 용량 컨테이너 또는 호출자가 제공한 메모리만 사용하며 자동 확장하지 않습니다.
+* **예측 가능한 실패**: `Pool::Create`, `Pool::TryGet`, `CommandBuffer::Push` 등은 용량 초과나 잘못된 입력을 실패값으로 보고합니다.
 * **C++20 최신 명세 적용**: concepts 및 requires 제약 조건을 통한 컴파일 타임 타입 검사 적용.
 * **초경량 설계**: 불필요한 외적 종속성을 전면 배제하고 메모리 효율을 극대화.
 * **xmake 시스템 연동**: 모던 빌드 툴 xmake를 활용한 빌드, 패키징 및 유닛 테스트의 완벽한 자동화.
@@ -23,19 +25,32 @@
 * **String.hpp**: 고정 크기 버퍼 최적화 문자열 클래스 (암시적 string_view 변환 및 결합 연산 지원)
 * **Map.hpp**: 해시 함수를 활용한 고속 키-값 해시 맵 (중복 키 제어 및 이터레이션 지원)
 * **Pool.hpp**: 고성능 리소스 풀 (세대(Generation) 기반 Dangling 핸들 추적 보호)
-* **SparseSet.hpp**: 엔티티 관리에 최적화된 스파스 셋 (삭제 시 요소 스왑 패킹을 통한 메모리 단편화 제어 및 **Paged(페이징) 구조**를 도입하여 대규모 엔티티 환경에서의 메모리 폭발 완벽 방어)
+* **SparseSet.hpp**: 엔티티 관리에 최적화된 완전 고정 용량 스파스 셋. dense/sparse 저장 공간을 객체 내부에 보유하며 실행 중 페이지를 할당하지 않습니다.
 * **CommandBuffer.hpp**: 비소유형 지연 명령 버퍼 (대량의 일괄 실행 명령어 배치 처리에 최적화)
 
 ### 2. 메모리 할당자 (Memory Allocators)
-* **LinearAllocator.hpp**: 한 번에 메모리를 일괄 해제(Reset)하는 초고속 아레나 할당자입니다. 소멸자 체인을 지원하여 비트리비얼(Non-trivial) 타입의 누수를 예방합니다.
-* **StackAllocator.hpp**: LIFO(후입선출) 방식으로 동작하는 스택 기반 할당자입니다. 특정 지점(Marker)을 지정해 해당 지점까지의 메모리를 되돌리는(Deallocate) 기능을 지원합니다.
-* **PointerHandle.hpp**: 원시 포인터 대신 할당자 내 메모리 블록의 상대적 오프셋을 활용하여 메모리를 참조하는 비소유형 안전 핸들(`PointerHandle<T>`)입니다. 메모리 재배치(Compaction)나 주소 변경 시에도 안전하게 메모리를 참조할 수 있게 돕습니다.
+* **LinearAllocator.hpp**: 호출자가 제공한 버퍼 위에서 동작하며 Reset으로 전체 공간을 재사용합니다.
+* **StackAllocator.hpp**: 호출자가 제공한 버퍼 위에서 LIFO 방식으로 동작하고 marker까지 되돌릴 수 있습니다.
+* **PointerHandle.hpp**: allocator 내부 offset과 epoch를 저장합니다. Reset 또는 stack rewind 뒤의 오래된 핸들은 `Get()`에서 `nullptr`을 반환합니다.
+
+### 외부 메모리 사용 예시
+
+```cpp
+#include <array>
+#include <memory/LinearAllocator.hpp>
+
+alignas(64) std::array<std::byte, 1024 * 1024> memory{};
+zet::memory::LinearAllocator arena(memory);
+auto value = arena.CreateHandle<int>(42);
+```
+
+ZET 컨테이너에 저장한 사용자 타입이나 콜백이 자체적으로 수행하는 할당은 ZET의 보장 범위에 포함되지 않습니다. 예를 들어 `List<std::string, 16>`의 저장 공간은 고정이지만 `std::string` 자체는 힙을 사용할 수 있습니다.
 
 ---
 
 ## 1. 로컬 빌드 및 유닛 테스트 방법
 
-본 프로젝트는 초경량 유닛 테스트 라이브러리인 doctest를 활용하여 전체 기능에 대한 100% 작동 테스트를 포함하고 있습니다.
+본 프로젝트는 doctest 기반 동작 테스트와 핵심 경로의 힙 할당 감시 테스트를 포함합니다.
 
 ### 빌드 및 실행 명령어
 

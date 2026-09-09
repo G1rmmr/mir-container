@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <span>
+#include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -19,15 +22,20 @@ namespace zet::memory {
 		};
 
 	public:
-		explicit LinearAllocator(const std::size_t chunkSize) {
-			start = static_cast<std::byte*>(::operator new(chunkSize, std::align_val_t{64}));
-			end = start + chunkSize;
-			offset = start;
+		explicit LinearAllocator(std::span<std::byte> storage) noexcept
+			: start(storage.data()),
+			  end(storage.empty() ? storage.data() : storage.data() + storage.size()),
+			  offset(storage.data()) {
+			if (storage.size() > std::numeric_limits<std::uint32_t>::max()) {
+				start = end = offset = nullptr;
+			}
 		}
+
+		LinearAllocator(void* storage, const std::size_t size) noexcept
+			: LinearAllocator(std::span<std::byte>(static_cast<std::byte*>(storage), size)) {}
 
 		~LinearAllocator() override {
 			Reset();
-			::operator delete(start, std::align_val_t{64});
 		}
 
 		LinearAllocator(const LinearAllocator&) = delete;
@@ -82,6 +90,8 @@ namespace zet::memory {
 			return start;
 		}
 
+		std::uint64_t GetEpoch() const noexcept override { return epoch; }
+
 		template <typename T, bool IsInternal = false, typename... Args>
 		PointerHandle<T> CreateHandle(Args&&... args) {
 			if constexpr (!IsInternal) {
@@ -133,10 +143,12 @@ namespace zet::memory {
 			}
 			offset = start;
 			lastDestructor = nullptr;
+			++epoch;
 		}
 
 	private:
 		destructor* lastDestructor = nullptr;
+		std::uint64_t epoch = 1;
 
 		std::byte* start = nullptr;
 		std::byte* end = nullptr;
