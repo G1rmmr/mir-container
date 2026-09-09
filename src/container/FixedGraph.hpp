@@ -22,7 +22,7 @@ namespace zet {
     public:
         using VertexHandle = PoolHandle;
         using EdgeHandle = PoolHandle;
-        struct PathEntry { VertexHandle Vertex{}; float Priority = 0.0F; };
+        struct PathEntry { VertexHandle Handle{}; float Priority = 0.0F; };
         struct PathEntryCompare { constexpr bool operator()(const PathEntry& lhs, const PathEntry& rhs) const noexcept { return lhs.Priority > rhs.Priority; } };
         struct TraversalScratch {
             BitSet<MaxVertices> Visited;
@@ -166,17 +166,17 @@ namespace zet {
             while (!scratch.Open.Empty()) {
                 const PathEntry entry = *scratch.Open.TryPeek();
                 (void)scratch.Open.TryPop();
-                if (scratch.Closed.Test(entry.Vertex.Index)) continue;
-                if (entry.Vertex == goal) break;
-                scratch.Closed.Set(entry.Vertex.Index);
-                const VertexRecord& vertex = vertices.Get(entry.Vertex);
+                if (scratch.Closed.Test(entry.Handle.Index)) continue;
+                if (entry.Handle == goal) break;
+                scratch.Closed.Set(entry.Handle.Index);
+                const VertexRecord& vertex = vertices.Get(entry.Handle);
                 for (EdgeHandle edge = vertex.FirstOut; edges.IsValid(edge); edge = edges.Get(edge).NextFrom) {
                     const EdgeRecord& current = edges.Get(edge);
                     if (scratch.Closed.Test(current.To.Index)) continue;
-                    const float tentative = scratch.Scores[entry.Vertex.Index] + static_cast<float>(cost(current.Value));
+                    const float tentative = scratch.Scores[entry.Handle.Index] + static_cast<float>(cost(current.Value));
                     if (tentative >= scratch.Scores[current.To.Index]) continue;
                     scratch.Scores[current.To.Index] = tentative;
-                    scratch.Parents[current.To.Index] = entry.Vertex;
+                    scratch.Parents[current.To.Index] = entry.Handle;
                     const float priority = tentative + static_cast<float>(heuristic(vertices.Get(current.To).Value));
                     if (!scratch.Open.TryPush(PathEntry{ current.To, priority })) return Status::InsufficientScratch;
                 }
