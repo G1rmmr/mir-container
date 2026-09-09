@@ -4,7 +4,7 @@
 namespace {
     struct Payload { int* Target; int Value; };
 
-    void ApplyPayload(const void* raw) {
+    void ApplyPayload(const void* raw) noexcept {
         const auto& payload = *static_cast<const Payload*>(raw);
         *payload.Target = payload.Value;
     }
@@ -21,6 +21,6 @@ TEST_CASE("CommandBuffer rejects invalid commands without allocation") {
     CHECK(commands.SizeBytes() == 0);
 
     struct OversizedPayload { std::byte Bytes[128]; };
-    CHECK_FALSE(commands.Push<OversizedPayload>([](const void*) {}, {}));
+    CHECK_FALSE(commands.Push<OversizedPayload>([](const void*) noexcept {}, {}));
     CHECK_FALSE(commands.Push<Payload>(nullptr, {&value, 7}));
 }

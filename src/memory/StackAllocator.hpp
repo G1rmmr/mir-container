@@ -1,168 +1,128 @@
 #pragma once
 
 #include "MemoryAllocator.hpp"
+#include "PointerHandle.hpp"
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <new>
 #include <span>
-#include <cstdint>
-#include <limits>
 #include <type_traits>
 #include <utility>
 
 namespace zet::memory {
-	class StackAllocator : public MemoryAllocator {
-	private:
-		struct destructor {
-			void (*Func)(void*) = nullptr;
-			destructor* Next = nullptr;
-			void* Target = nullptr;
-		};
+    class StackAllocator : public MemoryAllocator {
+    public:
+        struct Marker {
+            const StackAllocator* Owner = nullptr;
+            std::uint32_t Offset = 0;
+            std::uint64_t Epoch = 0;
+        };
 
-	public:
-		explicit StackAllocator(std::span<std::byte> storage) noexcept
-			: start(storage.data()),
-			  end(storage.empty() ? storage.data() : storage.data() + storage.size()),
-			  offset(storage.data()) {
-			if (storage.size() > std::numeric_limits<std::uint32_t>::max()) {
-				start = end = offset = nullptr;
-			}
-		}
+    private:
+        struct Destructor { void (*Func)(void*) noexcept = nullptr; Destructor* Next = nullptr; void* Target = nullptr; };
 
-		StackAllocator(void* storage, const std::size_t size) noexcept
-			: StackAllocator(std::span<std::byte>(static_cast<std::byte*>(storage), size)) {}
+    public:
+        explicit StackAllocator(std::span<std::byte> storage) noexcept
+            : start(storage.data()), end(storage.empty() ? storage.data() : storage.data() + storage.size()), offset(storage.data()) {
+            if (storage.size() > std::numeric_limits<std::uint32_t>::max()) start = end = offset = nullptr;
+        }
+        StackAllocator(void* storage, std::size_t size) noexcept : StackAllocator(std::span<std::byte>(static_cast<std::byte*>(storage), size)) {}
+        ~StackAllocator() override { Reset(); }
+        StackAllocator(const StackAllocator&) = delete;
+        StackAllocator& operator=(const StackAllocator&) = delete;
 
-		~StackAllocator() override {
-			Reset();
-		}
+        [[nodiscard]] void* TryAllocate(std::size_t size, std::size_t alignment = alignof(std::max_align_t)) noexcept {
+            void* result = Reserve(size, alignment, offset);
+            if (!result) return nullptr;
+            offset = static_cast<std::byte*>(result) + size;
+            return result;
+        }
+        void* Allocate(std::size_t size, std::size_t alignment = alignof(std::max_align_t)) noexcept { return TryAllocate(size, alignment); }
 
-		StackAllocator(const StackAllocator&) = delete;
-		StackAllocator& operator=(const StackAllocator&) = delete;
+        template <typename T, bool IsInternal = false, typename... Args>
+        requires std::constructible_from<T, Args...>
+        [[nodiscard]] T* TryCreate(Args&&... args) {
+            if constexpr (!IsInternal) static_assert(std::is_trivially_destructible_v<T>, "Use IsInternal=true for non-trivial types.");
+            std::byte* next = offset;
+            void* objectMemory = Reserve(sizeof(T), alignof(T), next);
+            if (!objectMemory) return nullptr;
+            next = static_cast<std::byte*>(objectMemory) + sizeof(T);
+            void* nodeMemory = nullptr;
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                nodeMemory = Reserve(sizeof(Destructor), alignof(Destructor), next);
+                if (!nodeMemory) return nullptr;
+                next = static_cast<std::byte*>(nodeMemory) + sizeof(Destructor);
+            }
+            T* object = ::new (objectMemory) T(std::forward<Args>(args)...);
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                auto* node = ::new (nodeMemory) Destructor{ [](void* value) noexcept { static_cast<T*>(value)->~T(); }, lastDestructor, object };
+                lastDestructor = node;
+            }
+            offset = next;
+            return object;
+        }
+        template <typename T, bool IsInternal = false, typename... Args>
+        requires std::constructible_from<T, Args...>
+        T* Create(Args&&... args) { return TryCreate<T, IsInternal>(std::forward<Args>(args)...); }
+        template <typename T, bool IsInternal = false, typename... Args>
+        requires std::constructible_from<T, Args...>
+        [[nodiscard]] PointerHandle<T> CreateHandle(Args&&... args) {
+            T* object = TryCreate<T, IsInternal>(std::forward<Args>(args)...);
+            if (!object) return {};
+            return PointerHandle<T>(this, static_cast<std::uint32_t>(reinterpret_cast<std::byte*>(object) - start));
+        }
 
-		void* Allocate(const std::size_t size, const std::size_t alignment = alignof(std::max_align_t)) {
-			void* currentPtr = static_cast<void*>(offset);
-			std::size_t space = end - offset;
+        [[nodiscard]] Marker GetMarker() const noexcept { return IsValid() ? Marker{ this, static_cast<std::uint32_t>(offset - start), epoch } : Marker{}; }
+        [[nodiscard]] bool TryFreeToMarker(Marker marker) noexcept {
+            if (!IsValid() || marker.Owner != this || marker.Epoch != epoch || marker.Offset > UsedBytes()) return false;
+            std::byte* target = start + marker.Offset;
+            const auto targetAddress = reinterpret_cast<std::uintptr_t>(target);
+            while (lastDestructor && reinterpret_cast<std::uintptr_t>(lastDestructor) >= targetAddress) {
+                lastDestructor->Func(lastDestructor->Target);
+                lastDestructor = lastDestructor->Next;
+            }
+            offset = target;
+            ++epoch;
+            return true;
+        }
+        void FreeToMarker(Marker marker) { const bool result = TryFreeToMarker(marker); assert(result && "[zet::StackAllocator] INVALID MARKER"); }
+        void FreeToMarker(std::byte* marker) {
+            if (!IsValid()) return;
+            const auto address = reinterpret_cast<std::uintptr_t>(marker);
+            const auto first = reinterpret_cast<std::uintptr_t>(start);
+            const auto current = reinterpret_cast<std::uintptr_t>(offset);
+            const bool valid = address >= first && address <= current;
+            assert(valid && "[zet::StackAllocator] INVALID MARKER");
+            if (valid) (void)TryFreeToMarker(Marker{ this, static_cast<std::uint32_t>(address - first), epoch });
+        }
 
-			if (std::align(alignment, size, currentPtr, space)) {
-				offset = static_cast<std::byte*>(currentPtr) + size;
-				return currentPtr;
-			}
+        [[nodiscard]] std::byte* GetBase() const override { return start; }
+        [[nodiscard]] std::uint64_t GetEpoch() const noexcept override { return epoch; }
+        [[nodiscard]] bool IsValid() const noexcept { return start != nullptr && end != nullptr && offset != nullptr; }
+        [[nodiscard]] std::size_t UsedBytes() const noexcept { return IsValid() ? static_cast<std::size_t>(offset - start) : 0; }
+        [[nodiscard]] std::size_t RemainingBytes() const noexcept { return IsValid() ? static_cast<std::size_t>(end - offset) : 0; }
+        void Reset() noexcept {
+            for (Destructor* node = lastDestructor; node != nullptr; node = node->Next) node->Func(node->Target);
+            offset = start;
+            lastDestructor = nullptr;
+            ++epoch;
+        }
 
-			return nullptr;
-		}
-
-		template <typename T, bool IsInternal = false, typename... Args>
-		T* Create(Args&&... args) {
-			if constexpr (!IsInternal) {
-				static_assert(std::is_trivially_destructible_v<T>, "[STACK ALLOCATOR] POLICY VIOLATION");
-			}
-
-			void* memory = Allocate(sizeof(T), alignof(T));
-			if (!memory) {
-				return nullptr;
-			}
-
-			T* objPtr = ::new (memory) T(std::forward<Args>(args)...);
-
-			if constexpr (!std::is_trivially_destructible_v<T>) {
-				void* node = Allocate(sizeof(destructor), alignof(destructor));
-				if (!node) {
-					objPtr->~T();
-					return nullptr;
-				}
-				destructor* newNode = ::new (node) destructor();
-				newNode->Func = [](void* ptr) {
-					static_cast<T*>(ptr)->~T();
-				};
-
-				newNode->Next = lastDestructor;
-				newNode->Target = objPtr;
-
-				lastDestructor = newNode;
-			}
-
-			return objPtr;
-		}
-
-		[[nodiscard]] std::byte* GetBase() const override {
-			return start;
-		}
-
-		std::uint64_t GetEpoch() const noexcept override { return epoch; }
-
-		template <typename T, bool IsInternal = false, typename... Args>
-		PointerHandle<T> CreateHandle(Args&&... args) {
-			if constexpr (!IsInternal) {
-				static_assert(std::is_trivially_destructible_v<T>, "[STACK ALLOCATOR] POLICY VIOLATION");
-			}
-
-			std::size_t space = end - offset;
-			void* ptr = offset;
-
-			if(!std::align(alignof(T), sizeof(T), ptr, space)) {
-				return PointerHandle<T>();
-			}
-
-			std::uint32_t offsetVal = static_cast<std::uint32_t>(static_cast<std::byte*>(ptr) - start);
-
-			if constexpr (!std::is_trivially_destructible_v<T>) {
-				std::byte* nextOffset = static_cast<std::byte*>(ptr) + sizeof(T);
-				std::size_t destSpace = end - nextOffset;
-				void* destPtr = nextOffset;
-				if (!std::align(alignof(destructor), sizeof(destructor), destPtr, destSpace)) {
-					return PointerHandle<T>();
-				}
-
-				offset = static_cast<std::byte*>(destPtr) + sizeof(destructor);
-
-				T* objPtr = ::new(ptr) T(std::forward<Args>(args)...);
-
-				destructor* newNode = ::new(destPtr) destructor();
-				newNode->Func = [](void* p) {
-					static_cast<T*>(p)->~T();
-				};
-				newNode->Next = lastDestructor;
-				newNode->Target = objPtr;
-				lastDestructor = newNode;
-
-				return PointerHandle<T>(this, offsetVal);
-			} else {
-				offset = static_cast<std::byte*>(ptr) + sizeof(T);
-				::new(ptr) T(std::forward<Args>(args)...);
-				return PointerHandle<T>(this, offsetVal);
-			}
-		}
-
-		void FreeToMarker(std::byte* marker) {
-			assert(marker >= start && marker <= offset);
-
-			while (lastDestructor && (void*)lastDestructor > (void*)marker) {
-				lastDestructor->Func(lastDestructor->Target);
-				lastDestructor = lastDestructor->Next;
-			}
-			offset = marker;
-			++epoch;
-		}
-
-		void Reset() noexcept {
-			destructor* currentNode = lastDestructor;
-			while (currentNode != nullptr) {
-				currentNode->Func(currentNode->Target);
-				currentNode = currentNode->Next;
-			}
-			offset = start;
-			lastDestructor = nullptr;
-			++epoch;
-		}
-
-	private:
-		destructor* lastDestructor = nullptr;
-		std::uint64_t epoch = 1;
-
-		std::byte* start = nullptr;
-		std::byte* end = nullptr;
-		std::byte* offset = nullptr;
-	};
+    private:
+        [[nodiscard]] void* Reserve(std::size_t size, std::size_t alignment, std::byte* current) const noexcept {
+            if (!IsValid() || alignment == 0 || (alignment & (alignment - 1)) != 0) return nullptr;
+            void* result = current;
+            std::size_t space = static_cast<std::size_t>(end - current);
+            return std::align(alignment, size, result, space) ? result : nullptr;
+        }
+        Destructor* lastDestructor = nullptr;
+        std::uint64_t epoch = 1;
+        std::byte* start = nullptr;
+        std::byte* end = nullptr;
+        std::byte* offset = nullptr;
+    };
 }

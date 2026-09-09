@@ -48,3 +48,20 @@ jobs:
     # Run unit tests and show detailed output
     - name: Run Tests
       run: xmake test --verbose
+
+  sanitizers:
+    name: Address and Undefined Behavior Sanitizers
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Xmake
+      uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: latest
+    - name: Configure sanitizer build
+      run: xmake config --mode=debug --yes --cxflags="-fsanitize=address,undefined -fno-omit-frame-pointer" --ldflags="-fsanitize=address,undefined"
+    - name: Build sanitizer targets
+      run: xmake
+    - name: Run sanitizer tests
+      run: ASAN_OPTIONS=detect_leaks=1 xmake test --verbose

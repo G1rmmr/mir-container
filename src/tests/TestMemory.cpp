@@ -65,22 +65,19 @@ TEST_CASE("LinearAllocator and PointerHandle operations") {
         CHECK(h2.Get() == nullptr);
     }
 
-    SUBCASE("Destructor allocation failure in Create destroys object immediately") {
+    SUBCASE("Create preflights destructor metadata before constructing") {
         int destructCount = 0;
         
         // Allocate space for just one DestructCounter object (8 bytes) + its destructor metadata node (24 bytes)
         // If we size it to 32 bytes:
-        // First, DestructCounter is created (8 bytes + alignment).
-        // Then, the destructor node (24 bytes) fits.
-        // If we limit it to 16 bytes:
-        // DestructCounter is created, but the destructor node fails to allocate.
-        // In this case, Create should destruct the object immediately and return nullptr to prevent a leak.
+        // A non-trivial object needs both its own storage and destructor metadata.
+        // With only 16 bytes neither partial construction nor buffer consumption occurs.
         {
 			alignas(64) std::array<std::byte, 16> tinyStorage{};
 			zet::memory::LinearAllocator tinyAlloc(tinyStorage);
             DestructCounter* ptr = tinyAlloc.Create<DestructCounter, true>(&destructCount);
             CHECK(ptr == nullptr);
-            CHECK(destructCount == 1); // Destructed immediately
+            CHECK(destructCount == 0);
         }
     }
 }

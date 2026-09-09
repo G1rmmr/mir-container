@@ -18,6 +18,7 @@ add_includedirs("src", "src/container", "src/memory", { public = true })
 add_headerfiles("src/(container/**.hpp)")
 add_headerfiles("src/(memory/**.hpp)")
 add_headerfiles("src/(Version.hpp)")
+add_headerfiles("src/(zet.hpp)")
 add_files("src/*.cpp")
 
 -- Unit Test Target
@@ -30,3 +31,10 @@ add_deps("zet")
 
 -- Register this binary as a test suite so xmake test can execute it
 add_tests("default")
+
+target("benchmark")
+set_default(false)
+set_kind("binary")
+set_languages("c++20")
+add_files("src/benchmarks/*.cpp")
+add_deps("zet")

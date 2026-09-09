@@ -10,7 +10,7 @@
 
 * **No Library-owned Allocation**: ZET does not obtain storage with `new`, `delete`, `malloc`, or `free`.
 * **Explicit Capacity**: Storage is fixed or caller-provided and never grows implicitly.
-* **Predictable Failure**: Capacity and input failures are reported by APIs such as `Pool::Create`, `Pool::TryGet`, and `CommandBuffer::Push`.
+* **Predictable Failure**: Checked `Try...` APIs return a null pointer, `false`, or `Status` without modifying the container on capacity or validation failure.
 * **C++20 Standard Compliance**: Type-safe template constraints using concepts and requires clauses.
 * **Lightweight Design**: Minimized dependencies, maximizing memory and allocation efficiency.
 * **Xmake System Integration**: Fully automated builds, packaging, and unit testing via the xmake build system.
@@ -27,6 +27,12 @@
 * **Pool.hpp**: High-performance resource pool featuring generation-based dangling handle safety and object reuse.
 * **SparseSet.hpp**: Fully fixed-capacity sparse set with dense packing and no runtime page allocation.
 * **CommandBuffer.hpp**: High-throughput non-owning deferred command buffer for executing bulk operations.
+* **BitSet.hpp**: Fixed bit set for masks, membership tests, and graph traversal state.
+* **RingBuffer.hpp / Deque.hpp / SpscQueue.hpp**: Bounded FIFO, deque, and single-producer/single-consumer queues.
+* **PriorityQueue.hpp**: Fixed-capacity binary heap for scheduling and path finding.
+* **FlatMap.hpp**: Sorted fixed-capacity map and set for cache-friendly ordered lookup.
+* **Hierarchy.hpp**: Generation-handle parent/child hierarchy with iterative traversal scratch buffers.
+* **FixedGraph.hpp / StaticGraph.hpp**: Mutable handle-based graph plus a build-once CSR-style graph.
 
 ### 2. Memory Allocators
 * **LinearAllocator.hpp**: Operates exclusively on a caller-provided buffer and reuses it on reset.
@@ -40,6 +46,10 @@ auto value = arena.CreateHandle<int>(42);
 ```
 
 Allocations performed by user-provided value types or callbacks are outside ZET's guarantee. For example, `List<std::string, 16>` has fixed container storage, but `std::string` may allocate internally.
+
+### Safety contract
+
+Use `Try...` APIs when invalid input or a full container is expected. The convenience APIs (`Push`, `Insert`, `Get`) retain assertion checks and terminate rather than returning a fabricated reference in release builds. `PoolHandle` records its owning pool, and allocator handles require the allocator and its external buffer to outlive the handle. Graph and hierarchy traversal/path APIs receive caller-owned scratch storage, so traversal does not allocate.
 
 ---
 

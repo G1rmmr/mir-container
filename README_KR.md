@@ -10,7 +10,7 @@
 
 * **라이브러리 자체 무할당**: ZET 구현은 `new`, `delete`, `malloc`, `free`로 저장 공간을 확보하지 않습니다.
 * **명시적 용량**: 고정 용량 컨테이너 또는 호출자가 제공한 메모리만 사용하며 자동 확장하지 않습니다.
-* **예측 가능한 실패**: `Pool::Create`, `Pool::TryGet`, `CommandBuffer::Push` 등은 용량 초과나 잘못된 입력을 실패값으로 보고합니다.
+* **예측 가능한 실패**: 검사형 `Try...` API는 용량 초과나 잘못된 입력에서 컨테이너 상태를 바꾸지 않고 null, `false`, 또는 `Status`를 반환합니다.
 * **C++20 최신 명세 적용**: concepts 및 requires 제약 조건을 통한 컴파일 타임 타입 검사 적용.
 * **초경량 설계**: 불필요한 외적 종속성을 전면 배제하고 메모리 효율을 극대화.
 * **xmake 시스템 연동**: 모던 빌드 툴 xmake를 활용한 빌드, 패키징 및 유닛 테스트의 완벽한 자동화.
@@ -27,6 +27,12 @@
 * **Pool.hpp**: 고성능 리소스 풀 (세대(Generation) 기반 Dangling 핸들 추적 보호)
 * **SparseSet.hpp**: 엔티티 관리에 최적화된 완전 고정 용량 스파스 셋. dense/sparse 저장 공간을 객체 내부에 보유하며 실행 중 페이지를 할당하지 않습니다.
 * **CommandBuffer.hpp**: 비소유형 지연 명령 버퍼 (대량의 일괄 실행 명령어 배치 처리에 최적화)
+* **BitSet.hpp**: ECS 마스크, 멤버십 검사, 그래프 방문 상태용 고정 비트 집합
+* **RingBuffer.hpp / Deque.hpp / SpscQueue.hpp**: 고정 FIFO, 덱, 단일 생산자·단일 소비자 큐
+* **PriorityQueue.hpp**: 스케줄러와 경로 탐색용 고정 용량 이진 힙
+* **FlatMap.hpp**: 정렬 순회와 캐시 친화적 검색을 위한 고정 용량 맵·셋
+* **Hierarchy.hpp**: 세대 핸들 기반 부모·자식 계층과 반복 순회 scratch 버퍼
+* **FixedGraph.hpp / StaticGraph.hpp**: 변경 가능한 핸들 기반 그래프와 build-once CSR 방식 그래프
 
 ### 2. 메모리 할당자 (Memory Allocators)
 * **LinearAllocator.hpp**: 호출자가 제공한 버퍼 위에서 동작하며 Reset으로 전체 공간을 재사용합니다.
@@ -45,6 +51,10 @@ auto value = arena.CreateHandle<int>(42);
 ```
 
 ZET 컨테이너에 저장한 사용자 타입이나 콜백이 자체적으로 수행하는 할당은 ZET의 보장 범위에 포함되지 않습니다. 예를 들어 `List<std::string, 16>`의 저장 공간은 고정이지만 `std::string` 자체는 힙을 사용할 수 있습니다.
+
+### 안전성 계약
+
+용량 초과나 잘못된 입력이 정상적으로 예상되는 경로에서는 `Try...` API를 사용합니다. 편의 API인 `Push`, `Insert`, `Get`은 단언문 검사를 유지하며 릴리스에서도 가짜 참조를 반환하지 않고 종료합니다. `PoolHandle`에는 소유 풀 정보가 포함되고, allocator 핸들을 쓰는 동안에는 allocator와 외부 버퍼가 핸들보다 오래 살아야 합니다. 그래프·계층 순회와 경로 탐색은 호출자가 scratch 저장 공간을 제공하므로 순회 중 할당하지 않습니다.
 
 ---
 
